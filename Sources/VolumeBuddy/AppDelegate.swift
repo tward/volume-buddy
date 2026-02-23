@@ -1,6 +1,9 @@
 import AppKit
 import CoreAudio
 import Foundation
+import os
+
+private let log = Logger(subsystem: "com.local.VolumeBuddy", category: "App")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let devices = DeviceManager.shared
@@ -130,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        print("[VolumeBuddy] Running — output: \(output.name), volume: \(volume), muted: \(muted)")
+        log.info("Running — output: \(output.name), volume: \(self.volume), muted: \(self.muted)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -142,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func switchOutput(to device: AudioDevice) {
         guard device.id != outputDevice?.id else { return }
 
-        print("[VolumeBuddy] Switching output to \(device.name)")
+        log.info("Switching output to \(device.name)")
         outputDevice = device
         UserDefaults.standard.set(device.uid, forKey: "outputDeviceUID")
         refreshMenu()
@@ -154,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine.volume = volume
             engine.muted = muted
         } catch {
-            print("[VolumeBuddy] Failed to switch output: \(error)")
+            log.error("Failed to switch output: \(error)")
         }
     }
 
@@ -183,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard devices.findDevice(named: "BlackHole 16ch") != nil,
               let output = outputDevice,
               devices.allOutputDevices().contains(where: { $0.id == output.id }) else {
-            print("[VolumeBuddy] Device disconnected, stopping engine")
+            log.warning("Device disconnected, stopping engine")
             engine.stop()
             return
         }
@@ -191,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // If engine isn't running, try to restart
         if !engine.isRunning,
            let bhID = blackHoleID, let bhUID = blackHoleUID {
-            print("[VolumeBuddy] Restarting engine after device change")
+            log.info("Restarting engine after device change")
             try? engine.restart(blackHoleID: bhID, blackHoleUID: bhUID,
                                 outputID: output.id, outputUID: output.uid)
             engine.volume = volume
@@ -203,11 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Delay to let audio subsystem stabilize
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self else { return }
-            print("[VolumeBuddy] Woke from sleep, checking audio engine")
+            log.info("Woke from sleep, checking audio engine")
 
             // Re-find devices (IDs may have changed)
             guard let bh = self.devices.findDevice(named: "BlackHole 16ch") else {
-                print("[VolumeBuddy] BlackHole not found after wake")
+                log.error("BlackHole not found after wake")
                 return
             }
 
@@ -219,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                let refreshed = self.devices.allOutputDevices().first(where: { $0.uid == currentUID }) {
                 self.outputDevice = refreshed
             } else {
-                print("[VolumeBuddy] Output device not found after wake")
+                log.error("Output device not found after wake")
                 return
             }
 
@@ -235,9 +238,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                         outputID: output.id, outputUID: output.uid)
                 self.engine.volume = self.volume
                 self.engine.muted = self.muted
-                print("[VolumeBuddy] Engine restarted after wake")
+                log.info("Engine restarted after wake")
             } catch {
-                print("[VolumeBuddy] Failed to restart after wake: \(error)")
+                log.error("Failed to restart after wake: \(error)")
             }
         }
     }
@@ -258,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Restore original default output so audio isn't lost
         if let origID = originalDefaultDeviceID {
             _ = devices.setDefaultOutput(origID)
-            print("[VolumeBuddy] Restored default output to device \(origID)")
+            log.info("Restored default output to device \(origID)")
         }
 
         removeBreadcrumb()
@@ -278,7 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func restoreBreadcrumbIfNeeded() {
         guard let content = try? String(contentsOfFile: breadcrumbPath, encoding: .utf8),
               let deviceID = AudioDeviceID(content) else { return }
-        print("[VolumeBuddy] Found stale breadcrumb, restoring device \(deviceID)")
+        log.warning("Found stale breadcrumb, restoring device \(deviceID)")
         _ = devices.setDefaultOutput(deviceID)
         removeBreadcrumb()
     }

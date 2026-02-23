@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os
 
 final class VolumeOSD {
     // OSD image IDs (from private OSD.framework)
@@ -15,14 +16,16 @@ final class VolumeOSD {
         // Load OSD.framework at runtime
         let bundlePath = "/System/Library/PrivateFrameworks/OSD.framework"
         guard let bundle = Bundle(path: bundlePath), bundle.load() else {
-            print("[VolumeOSD] Failed to load OSD.framework")
+            Logger(subsystem: "com.local.VolumeBuddy", category: "VolumeOSD")
+                .error("Failed to load OSD.framework")
             osdManager = nil
             showImageSel = Selector(("_"))
             return
         }
 
         guard let managerClass = NSClassFromString("OSDManager") as? NSObject.Type else {
-            print("[VolumeOSD] Failed to find OSDManager class")
+            Logger(subsystem: "com.local.VolumeBuddy", category: "VolumeOSD")
+                .error("Failed to find OSDManager class")
             osdManager = nil
             showImageSel = Selector(("_"))
             return
@@ -30,7 +33,8 @@ final class VolumeOSD {
 
         let sharedSel = Selector(("sharedManager"))
         guard managerClass.responds(to: sharedSel) else {
-            print("[VolumeOSD] OSDManager doesn't respond to sharedManager")
+            Logger(subsystem: "com.local.VolumeBuddy", category: "VolumeOSD")
+                .error("OSDManager doesn't respond to sharedManager")
             osdManager = nil
             showImageSel = Selector(("_"))
             return
