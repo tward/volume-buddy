@@ -50,7 +50,9 @@ final class DeviceManager {
 
     func fixedVolumeOutputDevices() -> [AudioDevice] {
         allOutputDevices().filter { device in
-            !device.name.contains("BlackHole") && !hasVolumeControl(device.id)
+            !device.name.contains("BlackHole")
+                && device.uid != AudioEngine.aggregateUID
+                && !hasVolumeControl(device.id)
         }
     }
 
