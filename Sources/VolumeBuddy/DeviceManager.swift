@@ -131,6 +131,34 @@ final class DeviceManager {
         return status == noErr
     }
 
+    func defaultSystemOutputDeviceID() -> AudioDeviceID? {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+        ) == noErr else { return nil }
+        return deviceID
+    }
+
+    func setDefaultSystemOutput(_ deviceID: AudioDeviceID) -> Bool {
+        var id = deviceID
+        let size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, size, &id
+        )
+        return status == noErr
+    }
+
     // MARK: - Private
 
     private func hasOutputStreams(_ deviceID: AudioDeviceID) -> Bool {

@@ -1,6 +1,9 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
+import os
+
+private let engineLog = Logger(subsystem: "com.local.VolumeBuddy", category: "AudioEngine")
 
 final class AudioEngine {
     fileprivate var audioUnit: AudioUnit?
@@ -38,7 +41,7 @@ final class AudioEngine {
         if sampleRate(deviceID: outputID) != targetRate {
             setSampleRate(deviceID: outputID, rate: targetRate)
             Thread.sleep(forTimeInterval: 0.3) // let CoreAudio settle
-            print("[AudioEngine] Set output sample rate to \(targetRate) Hz")
+            engineLog.info("Set output sample rate to \(targetRate) Hz")
         }
 
         // Create aggregate: BlackHole (input) + output device
@@ -91,7 +94,7 @@ final class AudioEngine {
                                       kAudioUnitScope_Output, 0,
                                       &outputMap, UInt32(outputMap.count * MemoryLayout<Int32>.size))
         guard status == noErr else { throw EngineError.cannotSetFormat(status) }
-        print("[AudioEngine] Output channel map: \(totalOutCh) channels, output at [\(bhOutCh),\(bhOutCh+1)]")
+        engineLog.debug("Output channel map: \(totalOutCh) channels, output at [\(bhOutCh),\(bhOutCh+1)]")
 
         // Input channel map: one entry per aggregate input channel (16 from BlackHole).
         // Route device ch0 → AU ch0, device ch1 → AU ch1, ignore the rest.
@@ -103,7 +106,7 @@ final class AudioEngine {
                                       kAudioUnitScope_Input, 1,
                                       &inputMap, UInt32(inputMap.count * MemoryLayout<Int32>.size))
         guard status == noErr else { throw EngineError.cannotSetFormat(status) }
-        print("[AudioEngine] Input channel map: \(totalInCh) channels, reading [0,1]")
+        engineLog.debug("Input channel map: \(totalInCh) channels, reading [0,1]")
 
         // Use stereo float32 at the matched sample rate
         var streamFormat = AudioStreamBasicDescription(
@@ -146,7 +149,7 @@ final class AudioEngine {
         status = AudioOutputUnitStart(au)
         guard status == noErr else { throw EngineError.cannotStart(status) }
 
-        print("[AudioEngine] Started — BlackHole out channels: \(bhOutCh), output at offset \(bhOutCh)")
+        engineLog.info("Started — output at channel offset \(bhOutCh)")
     }
 
     func stop() {
@@ -203,7 +206,7 @@ final class AudioEngine {
             guard AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uid) == noErr,
                   let cfStr = uid?.takeUnretainedValue() else { continue }
             if (cfStr as String) == Self.aggregateUID {
-                print("[AudioEngine] Destroying stale aggregate device \(id)")
+                engineLog.warning("Destroying stale aggregate device \(id)")
                 AudioHardwareDestroyAggregateDevice(id)
                 return
             }

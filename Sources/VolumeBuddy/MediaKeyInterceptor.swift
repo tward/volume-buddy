@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import os
 
 enum MediaKey: Int {
     case soundUp = 0
@@ -34,7 +35,8 @@ final class MediaKeyInterceptor {
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            print("[MediaKeyInterceptor] Failed to create event tap — Input Monitoring permission needed")
+            Logger(subsystem: "com.local.VolumeBuddy", category: "MediaKeyInterceptor")
+                .error("Failed to create event tap — Input Monitoring permission needed")
             return
         }
 
