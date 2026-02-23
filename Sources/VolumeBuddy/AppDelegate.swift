@@ -8,31 +8,9 @@ private let log = Logger(subsystem: "com.local.VolumeBuddy", category: "App")
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let devices = DeviceManager.shared
     private let engine = AudioEngine()
-    private let keyInterceptor = MediaKeyInterceptor()
     private let statusBar = StatusBarController()
-    private let osd = VolumeOSD.shared
 
-    private let volumeStep: Float = 1.0 / 16.0
     private let breadcrumbPath = NSTemporaryDirectory() + "VolumeBuddy.breadcrumb"
-
-    private var volume: Float = 1.0 {
-        didSet {
-            volume = max(0, min(1, volume))
-            engine.volume = volume
-            engine.muted = muted
-            statusBar.updateIcon(volume: volume, muted: muted)
-            UserDefaults.standard.set(volume, forKey: "volume")
-        }
-    }
-
-    private var muted: Bool = false {
-        didSet {
-            engine.muted = muted
-            engine.volume = volume
-            statusBar.updateIcon(volume: volume, muted: muted)
-            UserDefaults.standard.set(muted, forKey: "muted")
-        }
-    }
 
     // Cached device info
     private var blackHoleID: AudioDeviceID?
@@ -47,15 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Restore crash breadcrumb if needed
         restoreBreadcrumbIfNeeded()
 
-        // Restore saved state
-        if UserDefaults.standard.object(forKey: "volume") != nil {
-            volume = UserDefaults.standard.float(forKey: "volume")
-        }
-        muted = UserDefaults.standard.bool(forKey: "muted")
-
         // Set up the status bar
         statusBar.setup()
-        statusBar.updateIcon(volume: volume, muted: muted)
         statusBar.onQuit = { [weak self] in
             self?.shutdown()
             NSApp.terminate(nil)
@@ -108,8 +79,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try engine.start(blackHoleID: blackHole.id, blackHoleUID: blackHole.uid,
                               outputID: output.id, outputUID: output.uid)
-            engine.volume = volume
-            engine.muted = muted
         } catch {
             showAlert("Failed to start audio engine: \(error.localizedDescription)")
             if let orig = originalDefaultDeviceID { _ = devices.setDefaultOutput(orig) }
@@ -117,12 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-
-        // Start media key interception
-        keyInterceptor.onVolumeUp = { [weak self] in self?.stepVolume(up: true) }
-        keyInterceptor.onVolumeDown = { [weak self] in self?.stepVolume(up: false) }
-        keyInterceptor.onMute = { [weak self] in self?.toggleMute() }
-        keyInterceptor.start()
 
         // Listen for device changes
         devices.onDevicesChanged = { [weak self] in
@@ -137,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        log.info("Running — output: \(output.name), volume: \(self.volume), muted: \(self.muted)")
+        log.info("Running — output: \(output.name)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -158,27 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try engine.restart(blackHoleID: bhID, blackHoleUID: bhUID,
                                outputID: device.id, outputUID: device.uid)
-            engine.volume = volume
-            engine.muted = muted
         } catch {
             log.error("Failed to switch output: \(error)")
         }
-    }
-
-    // MARK: - Volume Control
-
-    private func stepVolume(up: Bool) {
-        if muted && up {
-            muted = false
-        } else {
-            volume += up ? volumeStep : -volumeStep
-        }
-        osd.show(volume: volume, muted: muted)
-    }
-
-    private func toggleMute() {
-        muted.toggle()
-        osd.show(volume: volume, muted: muted)
     }
 
     // MARK: - Device Change Handling
@@ -201,8 +146,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             log.info("Restarting engine after device change")
             try? engine.restart(blackHoleID: bhID, blackHoleUID: bhUID,
                                 outputID: output.id, outputUID: output.uid)
-            engine.volume = volume
-            engine.muted = muted
         }
     }
 
@@ -241,8 +184,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try self.engine.restart(blackHoleID: bh.id, blackHoleUID: bh.uid,
                                         outputID: output.id, outputUID: output.uid)
-                self.engine.volume = self.volume
-                self.engine.muted = self.muted
                 log.info("Engine restarted after wake")
             } catch {
                 log.error("Failed to restart after wake: \(error)")
@@ -260,7 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Shutdown
 
     private func shutdown() {
-        keyInterceptor.stop()
         engine.stop()
 
         // Restore original default outputs so audio isn't lost

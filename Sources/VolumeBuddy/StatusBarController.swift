@@ -12,28 +12,11 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func setup() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
-        updateIcon(volume: 1.0, muted: false)
+        item.button?.image = NSImage(systemSymbolName: "speaker.wave.3.fill", accessibilityDescription: "Volume")
 
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
-    }
-
-    func updateIcon(volume: Float, muted: Bool) {
-        let symbolName: String
-        if muted || volume == 0 {
-            symbolName = "speaker.slash.fill"
-        } else if volume < 0.33 {
-            symbolName = "speaker.wave.1.fill"
-        } else if volume < 0.66 {
-            symbolName = "speaker.wave.2.fill"
-        } else {
-            symbolName = "speaker.wave.3.fill"
-        }
-
-        if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Volume")
-        }
     }
 
     func updateMenu(devices: [AudioDevice], current: AudioDevice?) {
