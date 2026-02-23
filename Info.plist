@@ -15,6 +15,6 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VolumeBuddy needs audio input access to route system audio through BlackHole for volume control.</string>
+    <string>VolumeBuddy reads from BlackHole, a virtual audio device, to bridge system audio to your output device. No microphone or real audio input is accessed.</string>
 </dict>
 </plist>

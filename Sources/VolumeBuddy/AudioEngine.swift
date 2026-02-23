@@ -7,20 +7,8 @@ private let engineLog = Logger(subsystem: "com.local.VolumeBuddy", category: "Au
 
 final class AudioEngine {
     fileprivate var audioUnit: AudioUnit?
-    fileprivate var _volume: Float32 = 1.0
-    fileprivate var _muted: Bool = false
 
     private var aggregateDeviceID: AudioDeviceID = 0
-
-    var volume: Float {
-        get { _volume }
-        set { _volume = max(0, min(1, newValue)) }
-    }
-
-    var muted: Bool {
-        get { _muted }
-        set { _muted = newValue }
-    }
 
     var isRunning: Bool {
         guard let au = audioUnit else { return false }
@@ -331,23 +319,5 @@ private func renderCallback(
     ioData: UnsafeMutablePointer<AudioBufferList>?
 ) -> OSStatus {
     let engine = Unmanaged<AudioEngine>.fromOpaque(inRefCon).takeUnretainedValue()
-
-    // Pull audio from input bus 1 (BlackHole via aggregate)
-    let status = AudioUnitRender(engine.audioUnit!, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData!)
-    guard status == noErr else { return status }
-
-    // Apply volume
-    let gain = engine._muted ? Float32(0) : engine._volume
-    if gain != 1.0 {
-        let bufferList = UnsafeMutableAudioBufferListPointer(ioData!)
-        for buffer in bufferList {
-            guard let data = buffer.mData?.assumingMemoryBound(to: Float32.self) else { continue }
-            let frameCount = Int(buffer.mDataByteSize) / MemoryLayout<Float32>.size
-            for i in 0..<frameCount {
-                data[i] *= gain
-            }
-        }
-    }
-
-    return noErr
+    return AudioUnitRender(engine.audioUnit!, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData!)
 }
