@@ -31,18 +31,18 @@ final class AudioEngine {
     // MARK: - Lifecycle
 
     func start(blackHoleID: AudioDeviceID, blackHoleUID: String,
-               dellID: AudioDeviceID, dellUID: String) throws {
+               outputID: AudioDeviceID, outputUID: String) throws {
 
-        // Match sample rates — BlackHole defaults to 48kHz, Dell may differ
+        // Match sample rates — BlackHole defaults to 48kHz, output may differ
         let targetRate = sampleRate(deviceID: blackHoleID)
-        if sampleRate(deviceID: dellID) != targetRate {
-            setSampleRate(deviceID: dellID, rate: targetRate)
+        if sampleRate(deviceID: outputID) != targetRate {
+            setSampleRate(deviceID: outputID, rate: targetRate)
             Thread.sleep(forTimeInterval: 0.3) // let CoreAudio settle
-            print("[AudioEngine] Set Dell sample rate to \(targetRate) Hz")
+            print("[AudioEngine] Set output sample rate to \(targetRate) Hz")
         }
 
-        // Create aggregate: BlackHole (input) + Dell (output)
-        let aggID = try createAggregateDevice(inputUID: blackHoleUID, outputUID: dellUID)
+        // Create aggregate: BlackHole (input) + output device
+        let aggID = try createAggregateDevice(inputUID: blackHoleUID, outputUID: outputUID)
         aggregateDeviceID = aggID
 
         // Create HAL I/O unit
@@ -79,19 +79,19 @@ final class AudioEngine {
         guard status == noErr else { throw EngineError.cannotSetDevice(status) }
 
         // Output channel map: one entry per aggregate output channel.
-        // Aggregate output = [BlackHole out (16ch)] + [Dell out (2ch)] = 18 channels.
-        // Map: silence BlackHole channels, route AU stereo to Dell channels.
+        // Aggregate output = [BlackHole out (16ch)] + [output out (2ch)] = 18 channels.
+        // Map: silence BlackHole channels, route AU stereo to output channels.
         let bhOutCh = outputChannelCount(deviceID: blackHoleID)
-        let dellOutCh = outputChannelCount(deviceID: dellID)
-        let totalOutCh = bhOutCh + dellOutCh
+        let outDevCh = outputChannelCount(deviceID: outputID)
+        let totalOutCh = bhOutCh + outDevCh
         var outputMap = [Int32](repeating: -1, count: totalOutCh)
-        outputMap[bhOutCh] = 0      // AU left  → Dell left
-        outputMap[bhOutCh + 1] = 1  // AU right → Dell right
+        outputMap[bhOutCh] = 0      // AU left  → output left
+        outputMap[bhOutCh + 1] = 1  // AU right → output right
         status = AudioUnitSetProperty(au, kAudioOutputUnitProperty_ChannelMap,
                                       kAudioUnitScope_Output, 0,
                                       &outputMap, UInt32(outputMap.count * MemoryLayout<Int32>.size))
         guard status == noErr else { throw EngineError.cannotSetFormat(status) }
-        print("[AudioEngine] Output channel map: \(totalOutCh) channels, Dell at [\(bhOutCh),\(bhOutCh+1)]")
+        print("[AudioEngine] Output channel map: \(totalOutCh) channels, output at [\(bhOutCh),\(bhOutCh+1)]")
 
         // Input channel map: one entry per aggregate input channel (16 from BlackHole).
         // Route device ch0 → AU ch0, device ch1 → AU ch1, ignore the rest.
@@ -124,7 +124,7 @@ final class AudioEngine {
                                       &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         guard status == noErr else { throw EngineError.cannotSetFormat(status) }
 
-        // Set format on input scope of output bus (what we send to Dell)
+        // Set format on input scope of output bus (what we send to output device)
         status = AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat,
                                       kAudioUnitScope_Input, 0,
                                       &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
@@ -146,7 +146,7 @@ final class AudioEngine {
         status = AudioOutputUnitStart(au)
         guard status == noErr else { throw EngineError.cannotStart(status) }
 
-        print("[AudioEngine] Started — BlackHole out channels: \(bhOutCh), Dell at offset \(bhOutCh)")
+        print("[AudioEngine] Started — BlackHole out channels: \(bhOutCh), output at offset \(bhOutCh)")
     }
 
     func stop() {
@@ -163,19 +163,58 @@ final class AudioEngine {
     }
 
     func restart(blackHoleID: AudioDeviceID, blackHoleUID: String,
-                 dellID: AudioDeviceID, dellUID: String) throws {
+                 outputID: AudioDeviceID, outputUID: String) throws {
         stop()
         try start(blackHoleID: blackHoleID, blackHoleUID: blackHoleUID,
-                  dellID: dellID, dellUID: dellUID)
+                  outputID: outputID, outputUID: outputUID)
     }
 
     // MARK: - Aggregate Device
 
+    private static let aggregateUID = "com.local.VolumeBuddy.Aggregate"
+
+    func destroyStaleAggregate() {
+        // Clean up any non-private aggregate left by a previous crash
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+        ) == noErr else { return }
+
+        let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+        var deviceIDs = [AudioDeviceID](repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceIDs
+        ) == noErr else { return }
+
+        for id in deviceIDs {
+            var uidAddr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyDeviceUID,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            var uidSize: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(id, &uidAddr, 0, nil, &uidSize) == noErr else { continue }
+            var uid: Unmanaged<CFString>?
+            guard AudioObjectGetPropertyData(id, &uidAddr, 0, nil, &uidSize, &uid) == noErr,
+                  let cfStr = uid?.takeUnretainedValue() else { continue }
+            if (cfStr as String) == Self.aggregateUID {
+                print("[AudioEngine] Destroying stale aggregate device \(id)")
+                AudioHardwareDestroyAggregateDevice(id)
+                return
+            }
+        }
+    }
+
     private func createAggregateDevice(inputUID: String, outputUID: String) throws -> AudioDeviceID {
         let aggDesc: [String: Any] = [
-            kAudioAggregateDeviceUIDKey as String: "com.local.VolumeBuddy.Aggregate",
+            kAudioAggregateDeviceUIDKey as String: Self.aggregateUID,
             kAudioAggregateDeviceNameKey as String: "VolumeBuddy Aggregate",
-            kAudioAggregateDeviceIsPrivateKey as String: false,
+            kAudioAggregateDeviceIsPrivateKey as String: true,
             kAudioAggregateDeviceSubDeviceListKey as String: [
                 [
                     kAudioSubDeviceUIDKey as String: inputUID,

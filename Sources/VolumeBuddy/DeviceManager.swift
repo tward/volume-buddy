@@ -48,6 +48,26 @@ final class DeviceManager {
         allOutputDevices().first { $0.name.contains(name) }
     }
 
+    func fixedVolumeOutputDevices() -> [AudioDevice] {
+        allOutputDevices().filter { device in
+            !device.name.contains("BlackHole") && !hasVolumeControl(device.id)
+        }
+    }
+
+    func hasVolumeControl(_ deviceID: AudioDeviceID) -> Bool {
+        for element: UInt32 in [0, 1] {
+            var address = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: element
+            )
+            if AudioObjectHasProperty(deviceID, &address) {
+                return true
+            }
+        }
+        return false
+    }
+
     // MARK: - Device Properties
 
     func deviceUID(_ deviceID: AudioDeviceID) -> String? {

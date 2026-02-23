@@ -34,8 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Cached device info
     private var blackHoleID: AudioDeviceID?
     private var blackHoleUID: String?
-    private var dellID: AudioDeviceID?
-    private var dellUID: String?
+    private var outputDevice: AudioDevice?
     private var originalDefaultDeviceID: AudioDeviceID?
 
     // MARK: - App Lifecycle
@@ -57,23 +56,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.shutdown()
             NSApp.terminate(nil)
         }
+        statusBar.onOutputSelected = { [weak self] device in
+            self?.switchOutput(to: device)
+        }
 
-        // Find devices and start
+        // Find BlackHole
         guard let blackHole = devices.findDevice(named: "BlackHole 16ch") else {
             showAlert("BlackHole 16ch not found. Please install BlackHole first.")
-            NSApp.terminate(nil)
-            return
-        }
-        guard let dell = devices.findDevice(named: "DELL U2725QE") else {
-            showAlert("DELL U2725QE not found. Is the monitor connected?")
             NSApp.terminate(nil)
             return
         }
 
         blackHoleID = blackHole.id
         blackHoleUID = blackHole.uid
-        dellID = dell.id
-        dellUID = dell.uid
+
+        // Pick output device: last-used from UserDefaults, or first fixed-volume device
+        let fixedDevices = devices.fixedVolumeOutputDevices()
+        let savedUID = UserDefaults.standard.string(forKey: "outputDeviceUID")
+        let output = fixedDevices.first(where: { $0.uid == savedUID }) ?? fixedDevices.first
+
+        guard let output else {
+            showAlert("No fixed-volume output device found. Is a monitor or DAC connected?")
+            NSApp.terminate(nil)
+            return
+        }
+
+        outputDevice = output
+        refreshMenu()
+
+        // Clean up any stale aggregate from a previous crash
+        engine.destroyStaleAggregate()
 
         // Save original default & write breadcrumb
         originalDefaultDeviceID = devices.defaultOutputDeviceID()
@@ -86,15 +98,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Start the audio engine (HAL I/O: BlackHole input → Dell output)
+        // Start the audio engine
         do {
             try engine.start(blackHoleID: blackHole.id, blackHoleUID: blackHole.uid,
-                              dellID: dell.id, dellUID: dell.uid)
+                              outputID: output.id, outputUID: output.uid)
             engine.volume = volume
             engine.muted = muted
         } catch {
             showAlert("Failed to start audio engine: \(error.localizedDescription)")
-            // Restore original device
             if let orig = originalDefaultDeviceID { _ = devices.setDefaultOutput(orig) }
             NSApp.terminate(nil)
             return
@@ -119,11 +130,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        print("[VolumeBuddy] Running — volume: \(volume), muted: \(muted)")
+        print("[VolumeBuddy] Running — output: \(output.name), volume: \(volume), muted: \(muted)")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         shutdown()
+    }
+
+    // MARK: - Output Switching
+
+    private func switchOutput(to device: AudioDevice) {
+        guard device.id != outputDevice?.id else { return }
+
+        print("[VolumeBuddy] Switching output to \(device.name)")
+        outputDevice = device
+        UserDefaults.standard.set(device.uid, forKey: "outputDeviceUID")
+        refreshMenu()
+
+        guard let bhID = blackHoleID, let bhUID = blackHoleUID else { return }
+        do {
+            try engine.restart(blackHoleID: bhID, blackHoleUID: bhUID,
+                               outputID: device.id, outputUID: device.uid)
+            engine.volume = volume
+            engine.muted = muted
+        } catch {
+            print("[VolumeBuddy] Failed to switch output: \(error)")
+        }
     }
 
     // MARK: - Volume Control
@@ -145,9 +177,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Device Change Handling
 
     private func handleDeviceChange() {
+        refreshMenu()
+
         // Verify our devices are still present
         guard devices.findDevice(named: "BlackHole 16ch") != nil,
-              devices.findDevice(named: "DELL U2725QE") != nil else {
+              let output = outputDevice,
+              devices.allOutputDevices().contains(where: { $0.id == output.id }) else {
             print("[VolumeBuddy] Device disconnected, stopping engine")
             engine.stop()
             return
@@ -155,10 +190,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // If engine isn't running, try to restart
         if !engine.isRunning,
-           let bhID = blackHoleID, let bhUID = blackHoleUID,
-           let dID = dellID, let dUID = dellUID {
+           let bhID = blackHoleID, let bhUID = blackHoleUID {
             print("[VolumeBuddy] Restarting engine after device change")
-            try? engine.restart(blackHoleID: bhID, blackHoleUID: bhUID, dellID: dID, dellUID: dUID)
+            try? engine.restart(blackHoleID: bhID, blackHoleUID: bhUID,
+                                outputID: output.id, outputUID: output.uid)
             engine.volume = volume
             engine.muted = muted
         }
@@ -171,24 +206,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[VolumeBuddy] Woke from sleep, checking audio engine")
 
             // Re-find devices (IDs may have changed)
-            guard let bh = self.devices.findDevice(named: "BlackHole 16ch"),
-                  let dell = self.devices.findDevice(named: "DELL U2725QE") else {
-                print("[VolumeBuddy] Devices not found after wake")
+            guard let bh = self.devices.findDevice(named: "BlackHole 16ch") else {
+                print("[VolumeBuddy] BlackHole not found after wake")
                 return
             }
 
             self.blackHoleID = bh.id
             self.blackHoleUID = bh.uid
-            self.dellID = dell.id
-            self.dellUID = dell.uid
+
+            // Re-find current output device by UID
+            if let currentUID = self.outputDevice?.uid,
+               let refreshed = self.devices.allOutputDevices().first(where: { $0.uid == currentUID }) {
+                self.outputDevice = refreshed
+            } else {
+                print("[VolumeBuddy] Output device not found after wake")
+                return
+            }
+
+            self.refreshMenu()
 
             // Ensure BlackHole is still default
             _ = self.devices.setDefaultOutput(bh.id)
 
             // Restart engine
+            guard let output = self.outputDevice else { return }
             do {
                 try self.engine.restart(blackHoleID: bh.id, blackHoleUID: bh.uid,
-                                        dellID: dell.id, dellUID: dell.uid)
+                                        outputID: output.id, outputUID: output.uid)
                 self.engine.volume = self.volume
                 self.engine.muted = self.muted
                 print("[VolumeBuddy] Engine restarted after wake")
@@ -196,6 +240,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[VolumeBuddy] Failed to restart after wake: \(error)")
             }
         }
+    }
+
+    // MARK: - Menu
+
+    private func refreshMenu() {
+        let fixedDevices = devices.fixedVolumeOutputDevices()
+        statusBar.updateMenu(devices: fixedDevices, current: outputDevice)
     }
 
     // MARK: - Shutdown
