@@ -174,7 +174,7 @@ final class AudioEngine {
 
     // MARK: - Aggregate Device
 
-    private static let aggregateUID = "com.local.VolumeBuddy.Aggregate"
+    static let aggregateUID = "com.local.VolumeBuddy.Aggregate"
 
     func destroyStaleAggregate() {
         // Clean up any non-private aggregate left by a previous crash
