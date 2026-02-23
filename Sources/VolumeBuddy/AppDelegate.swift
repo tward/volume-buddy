@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var blackHoleUID: String?
     private var outputDevice: AudioDevice?
     private var originalDefaultDeviceID: AudioDeviceID?
+    private var originalSystemOutputDeviceID: AudioDeviceID?
 
     // MARK: - App Lifecycle
 
@@ -90,8 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Clean up any stale aggregate from a previous crash
         engine.destroyStaleAggregate()
 
-        // Save original default & write breadcrumb
+        // Save original defaults & write breadcrumb
         originalDefaultDeviceID = devices.defaultOutputDeviceID()
+        originalSystemOutputDeviceID = devices.defaultSystemOutputDeviceID()
         writeBreadcrumb()
 
         // Set BlackHole as default output so all system audio goes there
@@ -100,6 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        _ = devices.setDefaultSystemOutput(blackHole.id)
 
         // Start the audio engine
         do {
@@ -110,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             showAlert("Failed to start audio engine: \(error.localizedDescription)")
             if let orig = originalDefaultDeviceID { _ = devices.setDefaultOutput(orig) }
+            if let orig = originalSystemOutputDeviceID { _ = devices.setDefaultSystemOutput(orig) }
             NSApp.terminate(nil)
             return
         }
@@ -228,8 +232,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             self.refreshMenu()
 
-            // Ensure BlackHole is still default
+            // Ensure BlackHole is still default for both output and alerts
             _ = self.devices.setDefaultOutput(bh.id)
+            _ = self.devices.setDefaultSystemOutput(bh.id)
 
             // Restart engine
             guard let output = self.outputDevice else { return }
@@ -258,10 +263,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyInterceptor.stop()
         engine.stop()
 
-        // Restore original default output so audio isn't lost
+        // Restore original default outputs so audio isn't lost
         if let origID = originalDefaultDeviceID {
             _ = devices.setDefaultOutput(origID)
             log.info("Restored default output to device \(origID)")
+        }
+        if let origID = originalSystemOutputDeviceID {
+            _ = devices.setDefaultSystemOutput(origID)
         }
 
         removeBreadcrumb()
@@ -271,7 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func writeBreadcrumb() {
         guard let origID = originalDefaultDeviceID else { return }
-        try? "\(origID)".write(toFile: breadcrumbPath, atomically: true, encoding: .utf8)
+        let sysID = originalSystemOutputDeviceID ?? origID
+        try? "\(origID),\(sysID)".write(toFile: breadcrumbPath, atomically: true, encoding: .utf8)
     }
 
     private func removeBreadcrumb() {
@@ -279,10 +288,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restoreBreadcrumbIfNeeded() {
-        guard let content = try? String(contentsOfFile: breadcrumbPath, encoding: .utf8),
-              let deviceID = AudioDeviceID(content) else { return }
-        log.warning("Found stale breadcrumb, restoring device \(deviceID)")
-        _ = devices.setDefaultOutput(deviceID)
+        guard let content = try? String(contentsOfFile: breadcrumbPath, encoding: .utf8) else { return }
+        let parts = content.split(separator: ",")
+        guard let defaultID = AudioDeviceID(parts.first ?? "") else { return }
+        log.warning("Found stale breadcrumb, restoring devices")
+        _ = devices.setDefaultOutput(defaultID)
+        if parts.count > 1, let sysID = AudioDeviceID(parts[1]) {
+            _ = devices.setDefaultSystemOutput(sysID)
+        }
         removeBreadcrumb()
     }
 
