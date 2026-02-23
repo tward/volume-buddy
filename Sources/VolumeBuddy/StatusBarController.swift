@@ -2,10 +2,7 @@ import AppKit
 
 final class StatusBarController {
     private var statusItem: NSStatusItem?
-    private var slider: NSSlider?
 
-    var onVolumeChanged: ((Float) -> Void)?
-    var onMuteToggled: (() -> Void)?
     var onQuit: (() -> Void)?
 
     func setup() {
@@ -14,29 +11,6 @@ final class StatusBarController {
         updateIcon(volume: 1.0, muted: false)
 
         let menu = NSMenu()
-
-        // Volume slider item
-        let sliderItem = NSMenuItem()
-        let sliderView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 30))
-        let slider = NSSlider(frame: NSRect(x: 16, y: 4, width: 168, height: 22))
-        slider.minValue = 0
-        slider.maxValue = 1
-        slider.floatValue = 1.0
-        slider.target = self
-        slider.action = #selector(sliderChanged(_:))
-        slider.isContinuous = true
-        self.slider = slider
-        sliderView.addSubview(slider)
-        sliderItem.view = sliderView
-        menu.addItem(sliderItem)
-
-        menu.addItem(.separator())
-
-        let muteItem = NSMenuItem(title: "Mute", action: #selector(muteClicked), keyEquivalent: "m")
-        muteItem.target = self
-        menu.addItem(muteItem)
-
-        menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit VolumeBuddy", action: #selector(quitClicked), keyEquivalent: "q")
         quitItem.target = self
@@ -62,19 +36,7 @@ final class StatusBarController {
         }
     }
 
-    func updateSlider(volume: Float) {
-        slider?.floatValue = volume
-    }
-
     // MARK: - Actions
-
-    @objc private func sliderChanged(_ sender: NSSlider) {
-        onVolumeChanged?(sender.floatValue)
-    }
-
-    @objc private func muteClicked() {
-        onMuteToggled?()
-    }
 
     @objc private func quitClicked() {
         onQuit?()

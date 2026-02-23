@@ -18,7 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine.volume = volume
             engine.muted = muted
             statusBar.updateIcon(volume: volume, muted: muted)
-            statusBar.updateSlider(volume: volume)
             UserDefaults.standard.set(volume, forKey: "volume")
         }
     }
@@ -54,15 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Set up the status bar
         statusBar.setup()
         statusBar.updateIcon(volume: volume, muted: muted)
-        statusBar.updateSlider(volume: volume)
-        statusBar.onVolumeChanged = { [weak self] v in
-            self?.muted = false
-            self?.volume = v
-            self?.osd.show(volume: v, muted: false)
-        }
-        statusBar.onMuteToggled = { [weak self] in
-            self?.toggleMute()
-        }
         statusBar.onQuit = { [weak self] in
             self?.shutdown()
             NSApp.terminate(nil)
