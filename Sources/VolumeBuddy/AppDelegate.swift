@@ -15,7 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var volume: Float = 1.0 {
         didSet {
             volume = max(0, min(1, volume))
-            engine.volume = muted ? 0 : volume
+            engine.volume = volume
+            engine.muted = muted
             statusBar.updateIcon(volume: volume, muted: muted)
             statusBar.updateSlider(volume: volume)
             UserDefaults.standard.set(volume, forKey: "volume")
@@ -24,14 +25,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var muted: Bool = false {
         didSet {
-            engine.volume = muted ? 0 : volume
+            engine.muted = muted
+            engine.volume = volume
             statusBar.updateIcon(volume: volume, muted: muted)
             UserDefaults.standard.set(muted, forKey: "muted")
         }
     }
 
-    // Cached device UIDs
+    // Cached device info
+    private var blackHoleID: AudioDeviceID?
     private var blackHoleUID: String?
+    private var dellID: AudioDeviceID?
     private var dellUID: String?
     private var originalDefaultDeviceID: AudioDeviceID?
 
@@ -76,7 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        blackHoleID = blackHole.id
         blackHoleUID = blackHole.uid
+        dellID = dell.id
         dellUID = dell.uid
 
         // Save original default & write breadcrumb
@@ -90,10 +96,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Start the audio engine
+        // Start the audio engine (HAL I/O: BlackHole input → Dell output)
         do {
-            try engine.start(blackHoleUID: blackHole.uid, dellUID: dell.uid)
-            engine.volume = muted ? 0 : volume
+            try engine.start(blackHoleID: blackHole.id, blackHoleUID: blackHole.uid,
+                              dellID: dell.id, dellUID: dell.uid)
+            engine.volume = volume
+            engine.muted = muted
         } catch {
             showAlert("Failed to start audio engine: \(error.localizedDescription)")
             // Restore original device
@@ -156,10 +164,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // If engine isn't running, try to restart
-        if !engine.isRunning, let bhUID = blackHoleUID, let dUID = dellUID {
+        if !engine.isRunning,
+           let bhID = blackHoleID, let bhUID = blackHoleUID,
+           let dID = dellID, let dUID = dellUID {
             print("[VolumeBuddy] Restarting engine after device change")
-            try? engine.restart(blackHoleUID: bhUID, dellUID: dUID)
-            engine.volume = muted ? 0 : volume
+            try? engine.restart(blackHoleID: bhID, blackHoleUID: bhUID, dellID: dID, dellUID: dUID)
+            engine.volume = volume
+            engine.muted = muted
         }
     }
 
@@ -176,7 +187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
+            self.blackHoleID = bh.id
             self.blackHoleUID = bh.uid
+            self.dellID = dell.id
             self.dellUID = dell.uid
 
             // Ensure BlackHole is still default
@@ -184,8 +197,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Restart engine
             do {
-                try self.engine.restart(blackHoleUID: bh.uid, dellUID: dell.uid)
-                self.engine.volume = self.muted ? 0 : self.volume
+                try self.engine.restart(blackHoleID: bh.id, blackHoleUID: bh.uid,
+                                        dellID: dell.id, dellUID: dell.uid)
+                self.engine.volume = self.volume
+                self.engine.muted = self.muted
                 print("[VolumeBuddy] Engine restarted after wake")
             } catch {
                 print("[VolumeBuddy] Failed to restart after wake: \(error)")
